@@ -15,6 +15,7 @@ import {
   SRGBColorSpace,
 } from 'three'
 import { LOBBY } from '../config.js'
+import { addFixed, INVISIBLE_WALL, RAPIER } from '../physics.js'
 import { bakeInPlace } from '../bake.js'
 import { neon, solidBox } from '../propkit.js'
 import { mulberry32, toTexture } from '../textures.js'
@@ -30,6 +31,14 @@ import { part } from './props.js'
 // The floors scroll toward the entrance like a running belt.
 
 const PI = Math.PI
+// Shockwave tint per lane theme (the pulse that runs down the lane on each training clap).
+const PULSE = { sand: '#ff9a1f', ice: '#1fa8ff', wood: '#ffd23a', crystal: '#35d0ff', sakura: '#ff4f9a', royal: '#ffc928', admin: '#3dff6a' }
+const PULSE_TIME = 0.9 // s for the shockwave to run the lane
+
+// Tall invisible collision box (blocks the player, ignored by the camera ray).
+function wall(hx, hy, hz, x, y, z) {
+  addFixed(RAPIER.ColliderDesc.cuboid(hx, hy, hz), { x, y, z }, null, { groups: INVISIBLE_WALL })
+}
 const TILE = 2.5 // m of lane per floor texture repeat
 const BODY_FONT = '"Fredoka", "Arial Black", sans-serif'
 
@@ -216,10 +225,11 @@ function torii(g, x, z, w) {
   const red = mat('#d8262b', { roughness: 0.5 })
   const black = mat('#1d1a1d', { roughness: 0.6 })
   for (const s of [-1, 1]) part(g, new CylinderGeometry(0.17, 0.2, 3.8, 12), red, x, 2.1, z + s * (w / 2 + 0.05))
-  part(g, new BoxGeometry(0.34, 0.28, w + 1.0), red, x, 3.45, z)
-  part(g, new BoxGeometry(0.42, 0.24, w + 1.8), black, x, 4.05, z)
-  for (const s of [-1, 1]) part(g, new BoxGeometry(0.42, 0.24, 0.6), black, x, 4.17, z + s * (w / 2 + 0.95), s * 0.25, 0, 0)
-  part(g, new BoxGeometry(0.3, 0.3, w + 0.5), red, x, 3.8, z)
+  // Overhang kept small so it stays inside the (now packed) lane pitch.
+  part(g, new BoxGeometry(0.34, 0.28, w + 0.5), red, x, 3.45, z)
+  part(g, new BoxGeometry(0.42, 0.24, w + 0.9), black, x, 4.05, z)
+  for (const s of [-1, 1]) part(g, new BoxGeometry(0.42, 0.24, 0.5), black, x, 4.17, z + s * (w / 2 + 0.4), s * 0.25, 0, 0)
+  part(g, new BoxGeometry(0.3, 0.3, w + 0.3), red, x, 3.8, z)
   part(g, new BoxGeometry(0.2, 0.55, 0.5), black, x - 0.05, 3.55, z)
 }
 
@@ -314,6 +324,7 @@ export function buildLanes(root, fx) {
   const rand = mulberry32(31)
   const scrolls = []
   const ends = []
+  const waves = []
 
   const lanes = L.list.map((def, i) => {
     const theme = THEMES[def.theme]
@@ -356,8 +367,15 @@ export function buildLanes(root, fx) {
       part(g, new BoxGeometry(len, 0.09, 0.09), postMat, cx, 1.25, fz)
       part(g, new BoxGeometry(len, 0.09, 0.09), postMat, cx, 0.85, fz)
       solidBox(len / 2, 0.7, border / 2, cx, 0.7, bz)
+      wall(len / 2, 2, border / 2, cx, 2, bz)
     }
-    const pq = plaque(theme, def.tag, L.width + 0.5)
+    // The lane is closed: players train from the front of the plaque, never inside.
+    const closeZ = L.width / 2 + border
+    wall(0.15, 2, closeZ, L.minX - 0.1, 2, z)
+    wall(0.15, 2, closeZ, L.maxX + 0.1, 2, z)
+    for (const ry of [0.85, 1.25]) part(g, new BoxGeometry(0.09, 0.09, L.width + border * 2), postMat, L.minX + 0.1, ry, z)
+
+    const pq = plaque(theme, def.tag, L.width + 0.3)
     pq.position.set(L.minX - 1.05, 0.38, z)
     g.add(pq)
 
@@ -389,14 +407,30 @@ export function buildLanes(root, fx) {
       label.set(lines)
     }
     setOpen(def.rebirths === 0)
-    return { def, x: cx, z, halfW: len / 2, halfD: L.width / 2, setOpen, open: null }
+
+    // Shockwave: a glowing band + floor flash that runs down the lane (see update()).
+    const tint = new Color(PULSE[def.theme] ?? '#ffffff').multiplyScalar(1.6)
+    const pulse = new Group()
+    const band = new Mesh(new BoxGeometry(0.4, 1.8, L.width - 0.1), new MeshBasicMaterial({ color: tint, transparent: true, depthWrite: false }))
+    band.position.y = 1.1
+    const trail = new Mesh(new PlaneGeometry(9, L.width - 0.1).rotateX(-PI / 2), new MeshBasicMaterial({ color: tint, transparent: true, depthWrite: false }))
+    trail.position.set(-4.5, 0.27, 0)
+    pulse.add(band, trail)
+    pulse.visible = false
+    pulse.position.set(L.minX, 0, z)
+    root.add(pulse)
+    const wave = { t: -1, group: pulse, band, trail }
+    waves.push(wave)
+
+    // Training stance: the plaque in front of the lane (the lane itself is fenced off; stays clear of the Clap Zone band).
+    return { def, x: L.minX - 1, z, halfW: 1, halfD: L.width / 2, setOpen, open: null, pulse: () => (wave.t = 0) }
   })
 
   // Trees between the lane ends and the east wall.
   const zMin = L.z0 - L.pitch / 2
   const zMax = L.z0 + (L.list.length - 0.5) * L.pitch
   for (let z = zMin; z <= zMax; z += 5.2) cubeTree(g, L.maxX + 4 + rand() * 1.5, z + rand(), 0.9 + rand() * 0.35)
-  cubeTree(g, L.minX - 3, zMin - 2.5, 1)
+  cubeTree(g, L.minX - 3, zMin - 0.5, 1)
   bakeInPlace(g)
 
   // --- Effects: sakura petals drifting off the tree, admin sparks, royal glints, crystal frost ---
@@ -435,6 +469,21 @@ export function buildLanes(root, fx) {
     lanes,
     update(dt, elapsed) {
       for (const t of scrolls) t.offset.x = elapsed * 0.35 // belts run toward the entrance
+      for (const w of waves) {
+        if (w.t < 0) continue
+        w.t += dt / PULSE_TIME
+        if (w.t >= 1) {
+          w.t = -1
+          w.group.visible = false
+          continue
+        }
+        const k = w.t
+        w.group.visible = true
+        w.group.position.x = L.minX + k * len
+        const fade = (1 - k) * Math.min(1, k * 8)
+        w.band.material.opacity = 0.7 * fade
+        w.trail.material.opacity = 0.6 * fade
+      }
     },
   }
 }

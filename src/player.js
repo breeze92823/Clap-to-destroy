@@ -17,7 +17,9 @@ export const player = {
   grounded: true,
   facing: SPAWN_FACING, // yaw the character model faces, radians
   dims: { ...PLAYER_DIMS },
+  frozen: false, // true while a cutscene owns the character (the clap wave): input is ignored
 }
+const NO_MOVE = { x: 0, z: 0 }
 
 const HALF = PLAYER_DIMS.height / 2 // capsule centre above the feet
 const prev = { x: 0, y: 0, z: 0 }
@@ -95,7 +97,8 @@ function step(dt) {
   const fwdZ = -Math.cos(yaw)
   const rightX = Math.cos(yaw)
   const rightZ = -Math.sin(yaw)
-  const mv = inputState.move
+  const mv = player.frozen ? NO_MOVE : inputState.move
+  if (player.frozen) inputState.jump = false
   const len = Math.hypot(mv.x, mv.z)
   const scale = len > 1 ? 1 / len : 1
   const wishX = (fwdX * mv.z + rightX * mv.x) * scale

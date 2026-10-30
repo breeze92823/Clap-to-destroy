@@ -1,7 +1,8 @@
 import { BoxGeometry, CapsuleGeometry, ConeGeometry, CylinderGeometry, Group, Mesh, OctahedronGeometry, PointLight, SphereGeometry, TorusGeometry } from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { bakeInPlace } from '../bake.js'
-import { GAUNTLETS, LOBBY } from '../config.js'
+import { GAUNTLETS, LOBBY, REWARD_GAUNTLETS } from '../config.js'
+import { fmt } from '../hud.js'
 import { glow, neon, solidBox } from '../propkit.js'
 import { paintSoftDot, toTexture } from '../textures.js'
 import { mat } from './kit.js'
@@ -14,8 +15,9 @@ import { part } from './props.js'
 
 const sphere = new SphereGeometry(1, 20, 14)
 const PI = Math.PI
+const PHOENIX = REWARD_GAUNTLETS.find((g) => g.id === 'phoenix')
 
-const STYLES = {
+export const STYLES = {
   classic: { hand: '#f5f5f7', cuff: '#f5f5f7', rim: '#2a5bd7', strap: '#d8263a' },
   aloha: { hand: '#3cc94b', cuff: '#e8434f', rim: '#ffffff', strap: '#ffd23a' },
   leather: { hand: '#8a4a22', cuff: '#5e3216', rim: '#c98a4a', strap: '#4a2410' },
@@ -30,6 +32,7 @@ const STYLES = {
   gold: { hand: '#ffd23a', cuff: '#e6a51c', rim: '#fff3b0', strap: '#c98a12', metal: true },
   magma: { hand: '#221c1e', cuff: '#2d2426', rim: '#ff7a1a', strap: '#1a1416' },
   phoenix: { hand: '#e2361c', cuff: '#a8180f', rim: '#ffcf3a', strap: '#ff8a1c', gloss: true },
+  dragon: { hand: '#8a1a10', cuff: '#3a0a08', rim: '#ffcf3a', strap: '#e2361c', gloss: true },
 }
 
 function styleMat(color, s) {
@@ -163,7 +166,6 @@ export function glove(style) {
   return g
 }
 
-const fmt = (n) => (n >= 1000 ? `${+(n / 1000).toFixed(2)}K`.replace('.00K', 'K') : `${n}`)
 
 // Floor height at (x, z): the showroom terrace, else the hub plate.
 export function showroomFloor(x, z) {
@@ -274,8 +276,8 @@ export function buildPhoenix(root) {
   g.add(light)
   const label = new Billboard(
     [
-      { text: 'SOLD OUT', size: 44, color: '#ffe14a' },
-      { text: 'ALWAYS 125% BETTER', size: 40, gradient: ['#b6ff5c', '#2fe06a'] },
+      { text: `${fmt(PHOENIX.wins)} WINS`, size: 44, color: '#ffe14a' },
+      { text: `TOP TIER · +${fmt(PHOENIX.skill)} SKILL`, size: 40, gradient: ['#b6ff5c', '#2fe06a'] },
       { text: 'ROYAL', size: 46, color: '#ffffff' },
       { text: 'PHOENIX', size: 104, gradient: ['#ffe14a', '#ff8a1c', '#e8261a'], outline: '#3a0a06' },
     ],

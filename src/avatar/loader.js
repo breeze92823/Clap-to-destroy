@@ -28,6 +28,21 @@ const gltfLoader = new GLTFLoader()
 const objLoader = new OBJLoader()
 const textureLoader = new TextureLoader()
 
+// Players in a room often wear the same hat: load each accessory mesh / texture once and share it
+// (geometry and textures are shared, each wearer gets its own node + material). A failed load is
+// dropped from the cache so it can be retried.
+const meshCache = new Map()
+const textureCache = new Map()
+function cachedLoad(cache, url, load) {
+  let hit = cache.get(url)
+  if (!hit) {
+    hit = load(url)
+    cache.set(url, hit)
+    hit.catch(() => cache.delete(url))
+  }
+  return hit
+}
+
 // The bundled player.glb shares one material between every clone of the base
 // rig, so painting a skin onto it would leak onto every other character.
 // Give this instance its own copies first; meshes that shared a material
@@ -173,7 +188,7 @@ async function applyItem(root, slot, id) {
   if (!urls.mesh) return
   let object
   try {
-    object = await objLoader.loadAsync(urls.mesh)
+    object = (await cachedLoad(meshCache, urls.mesh, (u) => objLoader.loadAsync(u))).clone(true)
   } catch (err) {
     console.warn('[avatarLoader] accessory failed to load', urls.mesh, err)
     return
@@ -181,7 +196,7 @@ async function applyItem(root, slot, id) {
   let texture = null
   try {
     if (!urls.texture) throw new Error('no texture')
-    texture = configureItemTexture(await textureLoader.loadAsync(urls.texture))
+    texture = await cachedLoad(textureCache, urls.texture, async (u) => configureItemTexture(await textureLoader.loadAsync(u)))
   } catch {
     // An untextured accessory still reads better than skipping it outright.
   }

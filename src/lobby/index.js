@@ -1,20 +1,18 @@
 import { BoxGeometry, Color, Group } from 'three'
 import { DESTROYABLES, LOBBY } from '../config.js'
-import { bake, bakeInPlace } from '../bake.js'
+import { bake } from '../bake.js'
 import { mulberry32 } from '../textures.js'
-import { buildPhoenix, buildShowroom, showroomFloor } from './gauntlets.js'
-import { buildCandyCorner, buildEgg, buildGiftSpot, buildLuckyBlock, buildSigns } from './landmarks.js'
+import { buildPhoenix, buildShowroom } from './gauntlets.js'
+import { buildDistanceSigns, buildEgg, buildSigns } from './landmarks.js'
 import { buildLanes } from './lanes.js'
-import { buildPatch } from './patch.js'
 import { buildPlaza } from './plaza.js'
-import { arrow3D, BEACH_PROPS, blockTree, chevron, flower, palm, part, pumpkin, pumpkinPost } from './props.js'
+import { arrow3D, BEACH_PROPS, blockTree, chevron, flower, palm, part } from './props.js'
 import { buildSkyline } from './skyline.js'
 import { buildTerrain } from './terrain.js'
 import { mat } from './kit.js'
 
 // Builds the whole lobby and hands game.js the interactive parts:
-// destroyables (beach props), showroom plinths, training pads, the gift spot
-// and the hidden pumpkins. Static dressing is baked to a few meshes.
+// destroyables (beach props), showroom plinths, training pads. Static dressing is baked to a few meshes.
 
 const SMASH_COLORS = {
   ball: ['#ffffff', '#ee4f9e', '#9c5cf0', '#f2c230'],
@@ -45,16 +43,13 @@ export function buildLobby(scene, lighting, fx) {
 
   // --- Landmarks ---
   const egg = buildEgg(root)
-  const lucky = buildLuckyBlock(root)
   const phoenix = buildPhoenix(root)
   const showroom = buildShowroom(root)
-  const gift = buildGiftSpot(root)
   const laneRow = buildLanes(root, fx)
   const pads = laneRow.lanes
   const plaza = buildPlaza(root)
   buildSigns(root)
-  buildCandyCorner(root)
-  const patch = buildPatch(root)
+  const distanceSigns = buildDistanceSigns(root)
 
   // --- Static dressing (baked) ---
   const decor = new Group()
@@ -62,26 +57,6 @@ export function buildLobby(scene, lighting, fx) {
     const c = chevron()
     c.position.set(0, 0, z)
     decor.add(c)
-  }
-  const hubPosts = [[-3.9, -0.9], [3.9, -0.9], [9.2, -0.4], [-5.2, 9.5], [5.2, 9.5], [-26, -1.2], [13.6, 1.2], [13.6, 7.8], [13.6, 14.6], [16.5, 25], [-6.5, 26], [-6.2, 16.5]]
-  const beachPosts = []
-  for (let z = -14; z > LOBBY.beach.minZ + 6; z -= 32) beachPosts.push([-14.6, z], [14.6, z - 16])
-  for (const [x, z] of [...hubPosts, ...beachPosts]) {
-    const p = pumpkinPost(rand)
-    p.position.set(x, 0, z)
-    decor.add(p)
-  }
-  // Night lamps in the first few hub posts (lighting.js switches them on).
-  const bulb = { emissiveIntensity: 0 }
-  for (const [x, z] of hubPosts.slice(0, 6)) lighting.addLamp(x, 3.1, z, bulb)
-
-  // The pumpkin field on the east grass (not the Pumpkin Patch garden, see patch.js).
-  const pumpkinField = [[9.8, 10.5, 1.25], [11.8, 8.8, 0.55], [8, 12.8, 0.6], [12.2, 11.8, 0.65], [10.6, 13.6, 0.5], [7.2, 8.6, 0.45], [12.4, 15.6, 0.5], [8.2, 16.4, 0.45], [6.6, 6.2, 0.4], [-28, 30, 0.6], [44, 26, 0.5], [45, 31, 0.7]]
-  for (const [x, z, r] of pumpkinField) {
-    const p = pumpkin(r, r > 0.5, rand)
-    p.position.set(x, 0, z)
-    p.rotation.y = -0.6 + (rand() - 0.5) * 0.8
-    decor.add(p)
   }
   for (const [x, z] of [[-2.3, 7.4], [6.6, 16.5], [-7.2, 20.5], [14.6, 4.4], [-2, -3.8]]) {
     const f = flower()
@@ -98,9 +73,11 @@ export function buildLobby(scene, lighting, fx) {
   decor.add(arrowWrap)
   root.add(bake(decor, true))
 
-  // Palms by the beach entrance and along the sand edges.
+  // Palms by the beach entrance and along the sand edges, alternating sides to the far end.
   const palms = new Group()
-  for (const [x, z] of [[-13, -9.5], [13.4, -9.2], [-12.8, -36], [13, -58], [-13.4, -84], [13.2, -112], [-13, -140], [13.4, -168], [-13.2, -196], [13, -226], [-13.4, -256], [13, -282]]) {
+  const palmSpots = [[-13, -9.5], [13.4, -9.2]]
+  for (let z = -36, s = -1; z > LOBBY.beach.minZ + 10; z -= 24 + rand() * 8, s = -s) palmSpots.push([s * (12.8 + rand() * 0.6), z])
+  for (const [x, z] of palmSpots) {
     const p = palm(rand, 5.5 + rand() * 1.5)
     p.position.set(x, 0, z)
     p.rotation.y = rand() * Math.PI * 2
@@ -115,10 +92,11 @@ export function buildLobby(scene, lighting, fx) {
     t.position.set(x, y, z)
     trees.add(t)
   }
-  const { cliffLow, cliffHigh, hubWalls, hub } = LOBBY
+  const { cliffLow, cliffHigh, hubWalls, hub, beach } = LOBBY
+  const beachLen = beach.maxZ - beach.minZ
   for (const s of [-1, 1]) {
-    for (let z = -12; z > -296; z -= 13 + rand() * 6) tree(s * (26 + rand() * 6), cliffLow.height, z)
-    for (let i = 0; i < 26; i++) tree(s * (38 + rand() * 60), cliffHigh.height, -14 - rand() * 290, 1.2)
+    for (let z = -12; z > beach.minZ + 4; z -= 13 + rand() * 6) tree(s * (26 + rand() * 6), cliffLow.height, z)
+    for (let i = 0; i < Math.round(beachLen / 11); i++) tree(s * (38 + rand() * 60), cliffHigh.height, -14 - rand() * (beachLen - 10), 1.2)
     for (let i = 0; i < 12; i++) tree(s * (hub.maxX + 4 + rand() * 40), hubWalls.side, -4 + rand() * 90, 1.4)
   }
   root.add(bake(trees, false)) // spans the whole map: no shadow pass for it
@@ -136,7 +114,7 @@ export function buildLobby(scene, lighting, fx) {
     baked.rotation.y = g.rotation.y
     root.add(baked)
     const depth = Math.max(0, -z + LOBBY.beach.maxZ)
-    const k = 1 + depth / DESTROYABLES.depthScale
+    const k = DESTROYABLES.zone.growth ** (depth / DESTROYABLES.zone.length)
     const def = DESTROYABLES.kinds[kind]
     destroyables.push({
       kind,
@@ -170,16 +148,6 @@ export function buildLobby(scene, lighting, fx) {
     for (let i = 0; i < n; i++) place(pickKind(rand, -z), -12.5 + rand() * 25, z - rand() * 4)
   }
 
-  // --- Hidden pumpkins ---
-  const pumpkins = LOBBY.pumpkinSpots.map(([x, z]) => {
-    const y = showroomFloor(x, z)
-    const p = pumpkin(0.42, true, rand)
-    p.position.set(x, y, z)
-    bakeInPlace(p)
-    root.add(p)
-    return { group: p, x, y, z }
-  })
-
   // --- Ambient emitters ---
   const c = new Color()
   fx.addEmitter(45, (n) => {
@@ -207,23 +175,6 @@ export function buildLobby(scene, lighting, fx) {
       fx.shards.emit({ x: e.x + Math.cos(a) * e.radius, y: e.y + Math.random() * 2.2, z: e.z + Math.sin(a) * e.radius, vx: -Math.sin(a) * 0.5, vy: 0.5 + Math.random() * 0.5, vz: Math.cos(a) * 0.5, color: c, size: 0.22 + Math.random() * 0.2, life: 2.4, spin: 3 })
     }
   })
-  fx.addEmitter(9, (n) => {
-    const e = lucky.emitter
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2
-      c.setRGB(3.2, 2.5, 0.6)
-      fx.sparks.emit({ x: e.x + Math.cos(a) * e.radius, y: e.y + (Math.random() - 0.5) * 3, z: e.z + Math.sin(a) * e.radius, vy: 0.8, color: c, size: 0.4 + Math.random() * 0.3, life: 1.2, spin: 2 })
-    }
-  })
-  fx.addEmitter(5, (n) => {
-    for (let i = 0; i < n; i++) {
-      const p = pumpkins[Math.floor(Math.random() * pumpkins.length)]
-      if (!p.group.visible) continue
-      c.setRGB(3, 1.6, 0.3)
-      fx.sparks.emit({ x: p.x + (Math.random() - 0.5) * 1.2, y: p.y + 0.4 + Math.random() * 0.6, z: p.z + (Math.random() - 0.5) * 1.2, vy: 0.7, color: c, size: 0.35, life: 1, spin: 3 })
-    }
-  })
-
   // Waterfall splash + mist at the pool.
   const sp = terrain.splash
   fx.addEmitter(26, (n) => {
@@ -264,36 +215,21 @@ export function buildLobby(scene, lighting, fx) {
     }
   })
 
-  // Ripe patch pumpkins sparkle.
-  fx.addEmitter(10, (n) => {
-    for (let i = 0; i < n; i++) {
-      const p = patch.plots[Math.floor(Math.random() * patch.plots.length)]
-      if (!p.ripe) continue
-      c.setRGB(3.2, 1.8, 0.4)
-      fx.sparks.emit({ x: p.x + (Math.random() - 0.5), y: p.y + 0.3 + Math.random() * 0.8, z: p.z + (Math.random() - 0.5), vy: 0.8, color: c, size: 0.35, life: 0.9, spin: 3 })
-    }
-  })
-
   return {
     destroyables,
     plaza,
-    patch,
     phoenix: LOBBY.phoenix,
     showroom,
     pads,
-    gift,
-    pumpkins,
     update(dt, elapsed, focus) {
       terrain.update(dt, elapsed)
       skyline.update(focus)
+      distanceSigns.update(focus)
       egg.update(dt, elapsed)
-      lucky.update(dt, elapsed)
       phoenix.update(dt, elapsed)
       showroom.update(dt, elapsed)
-      gift.update(dt, elapsed)
       plaza.update(dt, elapsed)
       laneRow.update(dt, elapsed)
-      for (const p of pumpkins) p.group.rotation.y += dt * 0.8
     },
   }
 }

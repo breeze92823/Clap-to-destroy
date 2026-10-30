@@ -87,6 +87,7 @@ function paintBand(lengthM, widthM) {
 export function buildTerrain(root) {
   const b = new Batcher()
   const { hub, band, beach, channel, cliffLow, cliffHigh, hubWalls, far, showroom, waterfall } = LOBBY
+  const north = Math.min(-far, beach.minZ - 150) // the raised terrain runs on past the far end of the beach
   const W = PLATES.white()
   const G = PLATES.grass()
 
@@ -116,12 +117,12 @@ export function buildTerrain(root) {
     const [l0, l1] = span(cliffLow.inner, cliffLow.outer)
     cliff(b, l0, l1, beach.minZ, beach.maxZ, cliffLow.height)
     const [h0, h1] = span(cliffLow.outer, far)
-    cliff(b, h0, h1, -far, beach.maxZ, cliffHigh.height, 0)
+    cliff(b, h0, h1, north, beach.maxZ, cliffHigh.height, 0)
     const [e0, e1] = span(hub.maxX, far)
     hubWall(b, e0, e1, hub.minZ, far, hubWalls.side)
   }
   hubWall(b, hub.minX, hub.maxX, hub.maxZ, far, hubWalls.south)
-  cliff(b, -cliffLow.inner, cliffLow.inner, -far, beach.minZ, cliffHigh.height, 0) // the north end of the beach
+  cliff(b, -cliffLow.inner, cliffLow.inner, north, beach.minZ, cliffHigh.height, 0) // the north end of the beach
 
   // Waterfall pool at the foot of the south wall.
   const wf = waterfall

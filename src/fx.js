@@ -45,9 +45,11 @@ const vert = /* glsl */ `
   varying float vSpin;
   void main() {
     vColor = aColor;
-    vAlpha = aAlpha;
     vSpin = aSpin;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    // Fade out right in front of the lens: a camera driving through dust
+    // must not white out the screen.
+    vAlpha = aAlpha * smoothstep(1.2, 5.0, -mv.z);
     gl_PointSize = aSize * uScale / -mv.z;
     gl_Position = projectionMatrix * mv;
   }`
@@ -195,7 +197,7 @@ class ParticleSystem {
 
 // --- Debris ---------------------------------------------------------------------------
 class Debris {
-  constructor(scene, max = 160) {
+  constructor(scene, max = 520) {
     this.max = max
     this.mesh = new InstancedMesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial({ roughness: 0.7 }), max)
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -204,25 +206,33 @@ class Debris {
     this.mesh.frustumCulled = false
     this.mesh.count = 0
     scene.add(this.mesh)
-    this.items = Array.from({ length: max }, () => ({ p: new Vector3(), v: new Vector3(), q: new Quaternion(), axis: new Vector3(), spin: 0, size: 0, life: 0, max: 1, floor: 0 }))
+    this.items = Array.from({ length: max }, () => ({ p: new Vector3(), v: new Vector3(), q: new Quaternion(), axis: new Vector3(), dims: new Vector3(1, 1, 1), spin: 0, size: 0, life: 0, max: 1, floor: 0 }))
     this.count = 0
     this.m = new Matrix4()
     this.s = new Vector3()
     this.dq = new Quaternion()
     this.tc = new Color()
   }
-  emit(x, y, z, color, size, speed, floor = 0) {
+  // o (optional): { push: { x, z } m/s added along the ground, life: s on the
+  // ground before shrinking away, chunky: random plank / slab proportions }.
+  emit(x, y, z, color, size, speed, floor = 0, o = null) {
     if (this.count >= this.max) return
     const it = this.items[this.count]
     const a = Math.random() * Math.PI * 2
     it.p.set(x, y, z)
     it.v.set(Math.cos(a) * speed * (0.4 + Math.random()), speed * (0.8 + Math.random() * 0.9), Math.sin(a) * speed * (0.4 + Math.random()))
-    it.q.identity()
+    if (o?.push) {
+      it.v.x += o.push.x * (0.5 + Math.random())
+      it.v.z += o.push.z * (0.5 + Math.random())
+    }
+    it.q.setFromAxisAngle(it.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(), Math.random() * 6.28)
     it.axis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize()
-    it.spin = 4 + Math.random() * 8
+    it.spin = 4 + Math.random() * 10
     it.size = size * (0.6 + Math.random() * 0.7)
+    if (o?.chunky) it.dims.set(0.5 + Math.random() * 1.4, 0.35 + Math.random() * 0.6, 0.5 + Math.random() * 1.4)
+    else it.dims.set(1, 1, 1)
     it.life = 0
-    it.max = 1.4 + Math.random() * 0.6
+    it.max = (o?.life ?? 1.4) + Math.random() * 0.6
     it.floor = floor
     this.mesh.setColorAt(this.count, color)
     this.count++
@@ -245,7 +255,7 @@ class Debris {
       this.dq.setFromAxisAngle(it.axis, it.spin * dt)
       it.q.multiply(this.dq)
       const k = Math.min(1, (it.max - it.life) / 0.35)
-      this.s.setScalar(it.size * k)
+      this.s.copy(it.dims).multiplyScalar(it.size * k)
       this.m.compose(it.p, it.q, this.s)
       if (n !== i) {
         // Keep live debris packed (swap this item into slot n).
@@ -366,11 +376,11 @@ class Rings {
 }
 
 export function createFx(scene, preset = GRAPHICS_PRESETS.High) {
-  const glow = new ParticleSystem(scene, 900, paintSoftDot(64), AdditiveBlending)
-  const sparks = new ParticleSystem(scene, 500, paintSparkle(64), AdditiveBlending)
-  const shards = new ParticleSystem(scene, 500, paintShard(32), NormalBlending)
+  const glow = new ParticleSystem(scene, 1400, paintSoftDot(64), AdditiveBlending)
+  const sparks = new ParticleSystem(scene, 800, paintSparkle(64), AdditiveBlending)
+  const shards = new ParticleSystem(scene, 1000, paintShard(32), NormalBlending)
   const debris = new Debris(scene)
-  const popups = new Popups(scene)
+  const popups = new Popups(scene, 36)
   const rings = new Rings(scene)
   let density = preset.particles ?? 1
   const c = new Color()
@@ -428,6 +438,46 @@ export function createFx(scene, preset = GRAPHICS_PRESETS.High) {
         const a = Math.random() * Math.PI * 2
         c.setRGB(3, 2.6, 1.2)
         sparks.emit({ x, y: y + size * 0.6, z, vx: Math.cos(a) * 7, vy: 3 + Math.random() * 5, vz: Math.sin(a) * 7, color: c, size: 0.5, life: 0.5, drag: 3, gravity: -9, spin: 6 })
+      }
+    },
+    // A prop blown apart by the clap wave: chunky wreckage thrown along `dir`
+    // ({ x, z } unit, the way the wave travels) that lies on the sand a while,
+    // party confetti in its colours, a sand cloud, gold sparkles and a flash.
+    blast(x, y, z, colors, size = 1, dir = null) {
+      const push = dir ? { x: dir.x * (5 + size * 2), z: dir.z * (5 + size * 2) } : null
+      const n = Math.round((12 + size * 12) * density)
+      for (let i = 0; i < n; i++) {
+        c.set(colors[i % colors.length])
+        debris.emit(x + (Math.random() - 0.5) * size, y + Math.random() * size * 1.2, z + (Math.random() - 0.5) * size, c, 0.16 + size * 0.16, 3.5 + size * 1.6, 0, { push, life: 2.6, chunky: true })
+      }
+      for (let i = 0; i < n * 1.4; i++) {
+        c.set(colors[i % colors.length])
+        if (i % 4 === 0) c.setHSL(Math.random(), 0.9, 0.6) // a few party colours mixed in
+        const a = Math.random() * Math.PI * 2
+        const sp = 3 + Math.random() * 5
+        shards.emit({ x, y: y + size * 0.6, z, vx: Math.cos(a) * sp + (push?.x ?? 0) * 0.5, vy: 6 + Math.random() * 7, vz: Math.sin(a) * sp + (push?.z ?? 0) * 0.5, color: c, size: 0.22 + Math.random() * 0.22, life: 1.3 + Math.random() * 0.8, gravity: -11, drag: 1.6, spin: 10 })
+      }
+      for (let i = 0; i < n * 0.35; i++) {
+        const a = Math.random() * Math.PI * 2
+        c.setRGB(0.5, 0.44, 0.33)
+        glow.emit({ x: x + Math.cos(a) * size * 0.6, y: y + 0.2 + Math.random() * size * 0.5, z: z + Math.sin(a) * size * 0.6, vx: Math.cos(a) * 2.2 + (push?.x ?? 0) * 0.25, vy: 0.5 + Math.random() * 1.2, vz: Math.sin(a) * 2.2 + (push?.z ?? 0) * 0.25, color: c, size: 1.8 + size * 0.9, life: 1.1 + Math.random() * 0.5, drag: 2, grow: 1.8 })
+      }
+      for (let i = 0; i < n * 0.8; i++) {
+        const a = Math.random() * Math.PI * 2
+        c.setRGB(3.2, 2.6, 1.1)
+        sparks.emit({ x, y: y + size * 0.7, z, vx: Math.cos(a) * 8, vy: 4 + Math.random() * 6, vz: Math.sin(a) * 8, color: c, size: 0.45 + Math.random() * 0.3, life: 0.6, drag: 3, gravity: -9, spin: 8 })
+      }
+      c.setRGB(3, 2.9, 2.6)
+      glow.emit({ x, y: y + size * 0.6, z, color: c, size: 3 + size * 1.5, life: 0.16, grow: 1.6 })
+    },
+    // Confetti popping up round a point (the "+N" reward).
+    confetti(x, y, z, count = 70) {
+      const n = Math.round(count * density)
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2
+        const sp = 2 + Math.random() * 4
+        c.setHSL(Math.random(), 0.9, 0.58)
+        shards.emit({ x, y, z, vx: Math.cos(a) * sp, vy: 5 + Math.random() * 6, vz: Math.sin(a) * sp, color: c, size: 0.2 + Math.random() * 0.2, life: 1.6 + Math.random() * 0.8, gravity: -7, drag: 1.8, spin: 9 })
       }
     },
     update(dt) {

@@ -1,7 +1,7 @@
 import { ACESFilmicToneMapping, Clock, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
 import { CAMERA, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
-import { install as installInput, onKey, onWorldClick } from './input.js'
+import { install as installInput, onKey, onKeyUp, onWorldClick } from './input.js'
 import { installTouch } from './touch.js'
 import { createPlayerBody, interpolate as interpolatePlayer, player, resetPlayer, respawn } from './player.js'
 import { setCameraSensitivity, syncYawToPlayer, update as updateCamera } from './camera.js'
@@ -12,11 +12,15 @@ import { buildLobby } from './lobby/index.js'
 import { createFx } from './fx.js'
 import { createHud } from './hud.js'
 import { createGame } from './game.js'
+import { createWindows } from './windows.js'
+import { closeTopWindow } from './ui.js'
 import { createPostFx } from './postfx.js'
 import { setNeonBloom } from './propkit.js'
 import { buildDefaultCharacter, loadBaseCharacter } from './avatar/character.js'
 import { applyProportions, attachEquippedAccessories } from './avatar/loader.js'
 import { disposeAnimator, makeAnimator } from './avatar/animator.js'
+import { bindSnapshot, claimDaily, initNet, net, onServer, refreshDaily, saveProgress, sendFx, sendPose, syncAvatar, syncLoadout } from './net.js'
+import { createRemotePlayers } from './remotePlayers.js'
 
 // Boot order: Bloxity SDK -> renderer -> Rapier (async wasm) -> lighting + the lobby
 // (terrain, props, colliders), effects, HUD, game rules, player body -> avatar (async,
@@ -54,7 +58,7 @@ renderer.shadowMap.enabled = preset.shadows
 renderer.shadowMap.type = PCFSoftShadowMap
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.dpr))
 document.body.appendChild(renderer.domElement)
-installInput(() => bloxity.showMenu(), renderer.domElement) // Esc opens the portal menu
+installInput(() => closeTopWindow() || bloxity.showMenu(), renderer.domElement) // Esc closes the open window, else opens the portal menu
 
 const scene = new Scene()
 const camera = new PerspectiveCamera(CAMERA.fov, 1, CAMERA.near, CAMERA.far)
@@ -125,6 +129,7 @@ async function loadAvatar() {
     if (mine !== generation) return
     applyProportions(group, bloxity.authState.user ? bloxity.getProportions() : null)
     setAvatar(group)
+    syncAvatar() // the others see the new look
   } finally {
     if (mine === generation) avatarReady = true
   }
@@ -139,12 +144,35 @@ bloxity.subscribeAuth((s) => {
   }
 })
 bloxity.onAvatarChanged(loadAvatar)
-bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
+bloxity.onProportionsChanged(() => {
+  applyProportions(avatar, bloxity.getProportions())
+  syncAvatar()
+})
 bloxity.onRespawnRequest(respawn)
 
 // --- Game rules: claps, props, gauntlets, rebirth, pools, rewards -----------------
-const game = createGame({ scene, camera, lobby, fx, hud, onClap: () => animator?.clap() })
+const game = createGame({ scene, camera, lobby, fx, hud, onClap: () => animator?.clap(), onFx: sendFx, onSave: saveProgress, onDailyClaim: claimDaily, onDailyRefresh: refreshDaily })
+// The server holds the save: its doc fills the game, the game pushes its state back (net.js).
+bindSnapshot(game.snapshot)
+onServer('progress', game.hydrate)
+onServer('daily', game.setDaily)
+onServer('dailyResult', game.dailyResult)
+onServer('leaderboard', game.setBoards)
 onWorldClick(game.clap)
+const windows = createWindows(game, hud) // Rebirth, Inventory / My Pets, Trails, Playtime + Daily Rewards
+
+// The old build kept the save in the browser; the server holds it now, so drop what it left.
+try {
+  localStorage.removeItem('clap-to-destroy.save')
+  localStorage.removeItem('ctd-guest')
+} catch {
+  // Storage blocked: nothing to clean.
+}
+
+// --- Other players (net.js relays them, remotePlayers.js draws them) ---------------------
+const remotes = createRemotePlayers(scene, fx)
+initNet()
+let loadoutWait = 0
 
 // --- Modes + keys --------------------------------------------------------------
 onModeChanged((mode) => {
@@ -152,8 +180,11 @@ onModeChanged((mode) => {
 })
 onKey('KeyV', toggleMode)
 onKey('KeyN', () => lighting.toggleDayNight())
-onKey('KeyR', respawn)
-onKey('KeyE', () => game.interact())
+onKey('KeyR', () => game.eggAction('multi') || respawn()) // at a plaza egg R is Multi hatch
+onKey('KeyT', () => game.eggAction('auto'))
+onKey('KeyE', () => game.interact(true))
+onKeyUp('KeyE', () => game.interact(false))
+onKey('KeyF', () => game.clapZone()) // same as the Clap Zone's CLAP button
 installTouch({ mode: toggleMode, day: () => lighting.toggleDayNight(), respawn, clap: game.clap })
 
 // --- Loop -------------------------------------------------------------------
@@ -179,16 +210,26 @@ renderer.setAnimationLoop(() => {
   })
 
   game.update(dt)
+  const speed = Math.hypot(player.velocity.x, player.velocity.z)
+  sendPose(speed)
+  loadoutWait -= dt
+  if (loadoutWait <= 0) {
+    loadoutWait = 0.5
+    syncLoadout(game.loadout())
+  }
+  remotes.update(dt, elapsed, p)
   updateCamera(camera, dt)
-  lobby.update(dt, elapsed, playerGroup.position)
+  game.applyCamera(camera) // the clap wave's shots, blended over the player camera
+  const focus = game.focus() ?? playerGroup.position // the wave front while the camera rides it
+  lobby.update(dt, elapsed, focus)
   fx.update(dt)
-  lighting.update(dt, playerGroup.position)
+  lighting.update(dt, focus)
   postfx.render()
 
   // Loading ends once the scene has drawn and the avatar has had its chance (max ~5 s).
   if (shownLoading) {
     readySince += dt
-    if (avatarReady || readySince > 5) {
+    if ((avatarReady && net.loaded) || readySince > 5) {
       shownLoading = false
       bloxity.notifyFirstFrame()
     }
@@ -203,5 +244,5 @@ if (import.meta.env.DEV) {
     resetPlayer({ x, y, z }, facing)
     syncYawToPlayer()
   }
-  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, teleport, lobby, game, fx }
+  window.__game = { net, remotes, player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, teleport, lobby, game, fx, windows }
 }

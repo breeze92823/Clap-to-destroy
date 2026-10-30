@@ -93,8 +93,18 @@ export function addDynamic(mesh, shape, { density = 1, friction = 0.6, restituti
 }
 
 // Fixed collider at a world transform (no body needed for static geometry).
-export function addFixed(shape, position, rotation = null, { friction = 0.8, restitution = 0 } = {}) {
+// Collision groups (Rapier packs them as memberships << 16 | filter). Colliders
+// default to every membership; invisible walls belong to INVISIBLE only, and the
+// camera ray only looks for SOLID members, so the player bumps into them but the
+// camera never pulls in against them.
+const SOLID = 0x0001
+const INVISIBLE = 0x0002
+export const INVISIBLE_WALL = (INVISIBLE << 16) | 0xffff
+const CAMERA_RAY = (0xffff << 16) | SOLID
+
+export function addFixed(shape, position, rotation = null, { friction = 0.8, restitution = 0, groups = null } = {}) {
   shape.setTranslation(position.x, position.y, position.z).setFriction(friction).setRestitution(restitution)
+  if (groups !== null) shape.setCollisionGroups(groups)
   if (rotation) shape.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w })
   return world.createCollider(shape)
 }
@@ -115,7 +125,7 @@ export function removeBody(body) {
 }
 
 // First fixed collider hit between two points, as a 0..1 fraction of the
-// segment (1 = clear). Crates, balls and the player never block it.
+// segment (1 = clear). Crates, balls, the player and invisible walls never block it.
 const STATIC_ONLY = () => RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC | RAPIER.QueryFilterFlags.EXCLUDE_SENSORS
 export function segmentClear(ax, ay, az, bx, by, bz) {
   if (!world) return 1
@@ -125,7 +135,7 @@ export function segmentClear(ax, ay, az, bx, by, bz) {
   const len = Math.hypot(dx, dy, dz)
   if (len < 1e-4) return 1
   const r = new RAPIER.Ray({ x: ax, y: ay, z: az }, { x: dx / len, y: dy / len, z: dz / len })
-  const hit = world.castRay(r, len, true, STATIC_ONLY())
+  const hit = world.castRay(r, len, true, STATIC_ONLY(), CAMERA_RAY)
   if (!hit) return 1
   return (hit.timeOfImpact ?? hit.toi) / len
 }

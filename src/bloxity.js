@@ -156,6 +156,7 @@ export function init() {
       if (typeof off === 'function') unsubscribers.push(off)
     }
     SDK.settings.triggerAll?.()
+    defineLeaderboards(SDK)
 
     unsubscribers.push(SDK.auth.onUserChanged(onUser))
 
@@ -327,6 +328,89 @@ export async function locateRoom(id) {
 export function updateRoom(roomId) {
   try {
     sdk()?.game?.updateRoom?.(roomId)
+  } catch {
+    // Ignore.
+  }
+}
+
+// --- Leaderboards -----------------------------------------------------
+// Declared once after init (creates the portal's trophy button). Existing boards are owned by the
+// dashboard afterwards, so later edits here are ignored. All three keep the player's best value.
+const BOARDS = [
+  { id: 'wins', label: 'Wins', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'skill', label: 'SKILL', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'rebirths', label: 'Rebirths', order: 'desc', mode: 'best', format: 'number', reset: 'none' },
+]
+
+function defineLeaderboards(SDK) {
+  try {
+    SDK.leaderboard?.define?.(BOARDS)
+  } catch (err) {
+    console.warn('[bloxity] leaderboard.define failed', err)
+  }
+}
+
+const submitted = {} // board id -> last score sent (or in flight)
+const SUBMIT_GAP_MS = 20000
+let lastSubmitAt = 0
+
+// Sends the current scores of every board that rose since the last send, at most every
+// SUBMIT_GAP_MS unless `force` (a rebirth is final the moment it happens). Guests and the missing
+// SDK are skipped. Never throws.
+export function submitScores(scores, force = false) {
+  const SDK = sdk()
+  if (!SDK?.leaderboard?.submit || !authState.user) return
+  const now = performance.now()
+  if (!force && now - lastSubmitAt < SUBMIT_GAP_MS) return
+  for (const { id } of BOARDS) {
+    const score = Math.floor(scores[id])
+    if (!Number.isFinite(score) || score <= 0 || score <= (submitted[id] ?? 0)) continue
+    lastSubmitAt = now
+    const prev = submitted[id]
+    submitted[id] = score
+    Promise.resolve(SDK.leaderboard.submit(id, score))
+      .then((res) => {
+        if (res == null) submitted[id] = prev // not accepted: try again next time
+      })
+      .catch(() => {
+        submitted[id] = prev
+      })
+  }
+}
+
+// Top rows of a board as [{ name, value }], or null when unavailable (offline / older SDK).
+export async function getTopScores(id, limit = 9) {
+  try {
+    const res = await sdk()?.leaderboard?.getTop?.(id, { limit })
+    const list = Array.isArray(res) ? res : res?.entries ?? res?.rows ?? res?.results ?? null
+    if (!Array.isArray(list)) return null
+    return list.slice(0, limit).map((r) => ({
+      name: r.displayName || r.username || r.name || 'Player',
+      value: Number(r.score ?? r.value ?? 0),
+      userId: r.userId ?? r.id ?? null,
+    }))
+  } catch {
+    return null
+  }
+}
+
+// Opens the portal's board panel; false outside Bloxity.
+export function openLeaderboard(id) {
+  try {
+    return !!sdk()?.leaderboard?.open?.(id)
+  } catch {
+    return false
+  }
+}
+
+// Tells the portal who is in the room (join toasts, who is here). `already` = they were there when
+// we joined (playerInRoom), else they came after us (playerJoined).
+export function reportPlayer(username, already) {
+  if (!username) return
+  try {
+    const game = sdk()?.game
+    if (already) game?.playerInRoom?.(username)
+    else game?.playerJoined?.(username)
   } catch {
     // Ignore.
   }

@@ -1,5 +1,6 @@
 // Keyboard + mouse. WASD/arrows move (camera-relative, consumed by player.js),
-// right-drag looks (or mouse look while pointer-locked), left click on the
+// mouse look while pointer-locked (click grabs, Esc releases; drag where it is
+// refused or not yet granted), left click on the
 // world claps (onWorldClick) and wheel
 // zoom (consumed by camera.js), edge-triggered actions cleared by their consumer.
 // Touch controls (touch.js) write look/zoom/jump directly and move/sprint via
@@ -17,6 +18,7 @@ export const inputState = {
 const NOTCH_PER_DELTA = [1 / 100, 1 / 3, 1]
 
 const held = new Set()
+const keyUpActions = new Map()
 const keyActions = new Map() // code -> fn, for one-shot keys (mode toggle, day/night...)
 let orbiting = false // right-drag fallback where pointer lock is refused
 let canvas = null
@@ -39,6 +41,11 @@ export function onWorldClick(fn) {
 // Registers a one-shot key (fires on keydown, never on auto-repeat).
 export function onKey(code, fn) {
   keyActions.set(code, fn)
+}
+
+// Registers a key-release handler (pairs with onKey for hold-to-confirm keys).
+export function onKeyUp(code, fn) {
+  keyUpActions.set(code, fn)
 }
 
 function recomputeMove() {
@@ -85,14 +92,19 @@ export function install(showMenu, canvasEl) {
   })
   window.addEventListener('keyup', (e) => {
     held.delete(e.code)
+    keyUpActions.get(e.code)?.()
     recomputeMove()
   })
   window.addEventListener('pointerdown', (e) => {
     const onWorld = e.target === canvas
     if (e.button === 2 && !isLocked()) orbiting = true
-    // A left click on the world claps (the cursor stays free for the HUD, like the
-    // reference); right-drag turns the camera.
-    if (e.button === 0 && onWorld && e.pointerType === 'mouse') worldClick?.()
+    if (e.button === 0 && onWorld && e.pointerType === 'mouse') {
+      // A click on the world claps and takes the cursor (Esc gives it back; never on touch).
+      // Until the lock lands (or where it is refused) the drag turns the camera instead.
+      requestLock()
+      if (!isLocked()) orbiting = true
+      worldClick?.()
+    }
   })
   window.addEventListener('pointerup', (e) => {
     if (e.button === 0 || e.button === 2) orbiting = false

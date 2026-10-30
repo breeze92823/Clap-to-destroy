@@ -20,7 +20,8 @@ import {
   Vector2,
 } from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
-import { LOBBY } from '../config.js'
+import { EGGS as EGG_DEFS, LOBBY, PET_KINDS } from '../config.js'
+import { fmt } from '../hud.js'
 import { bakeInPlace } from '../bake.js'
 import { neon, solidBox } from '../propkit.js'
 import { TITLE_FONT, titleFontReady } from './fonts.js'
@@ -218,9 +219,9 @@ function rainbowEgg() {
 }
 
 const EGGS = [
-  { key: 'common', name: 'COMMON', shell: '#efe3d0', spots: '#d8c4a6', top: '#ffffff', side: '#3a8fe0', cost: '50 Wins', nameColor: '#ffffff' },
-  { key: 'uncommon', name: 'UNCOMMON', shell: '#58e35c', spots: '#3cc444', top: '#5ff062', side: '#2aa834', cost: '500 Wins', nameColor: '#7dff7a' },
-  { key: 'rare', name: 'RARE', shell: '#5fe0ff', spots: '#3cc4ef', top: '#4ad8ff', side: '#2a7fe0', cost: '20K Wins', nameColor: '#4ad8ff' },
+  { key: 'common', name: 'COMMON', shell: '#efe3d0', spots: '#d8c4a6', top: '#ffffff', side: '#3a8fe0', cost: `${fmt(EGG_DEFS.common.price)} Wins`, nameColor: '#ffffff' },
+  { key: 'uncommon', name: 'UNCOMMON', shell: '#58e35c', spots: '#3cc444', top: '#5ff062', side: '#2aa834', cost: `${fmt(EGG_DEFS.uncommon.price)} Wins`, nameColor: '#7dff7a' },
+  { key: 'rare', name: 'RARE', shell: '#5fe0ff', spots: '#3cc4ef', top: '#4ad8ff', side: '#2a7fe0', cost: `${fmt(EGG_DEFS.rare.price)} Wins`, nameColor: '#4ad8ff' },
   { key: 'rainbow', name: 'RAINBOW EGG', top: '#ff5fd0', side: '#c42aa8', cost: '45', premium: true },
 ]
 
@@ -262,7 +263,7 @@ function buildEgg(root, def, x, z) {
   )
   label.sprite.position.set(0, 3.25, 0)
   g.add(label.sprite)
-  return { egg, x, z, phase: x }
+  return { key: def.key, egg, x, z, phase: x }
 }
 
 // --- The golden cat on its throne (the limited pet showcase) ------------------------------
@@ -309,8 +310,8 @@ function buildStatue(root, x, z) {
   bakeInPlace(g)
   const label = new Billboard(
     [
-      { text: 'NEW LIMITED', size: 40, gradient: ['#ff6b8a', '#ff2a4a'], outline: '#3a0610' },
-      { text: 'Always 900%', size: 30, color: '#ffffff', font: 'body' },
+      { text: 'NEW UNLIMITED', size: 40, gradient: ['#b6ff5c', '#2fe06a'], outline: '#06301a' },
+      { text: `Admin Egg · x${PET_KINDS.adminPhoenix.mult} SKILL`, size: 30, color: '#ffffff', font: 'body' },
     ],
     1.4,
   )
