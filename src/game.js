@@ -745,7 +745,7 @@ export function createGame({ scene, camera, lobby, fx, hud, onClap, onFx, onSave
     const m = Math.floor((sec % 3600) / 60)
     return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`
   }
-  const boardFormat = { level: (v) => `Lv ${fmt(v)}`, time: timeText, spent: (v) => `R$ ${v.toLocaleString('en')}`, wins: fmt }
+  const boardFormat = { level: (v) => `Lv ${fmt(v)}`, time: timeText, skill: fmt, wins: fmt }
   // The Wins board shows the real Bloxity top list once it answers; the others (and offline play)
   // keep the made-up rivals.
   let realWins = null
@@ -757,15 +757,15 @@ export function createGame({ scene, camera, lobby, fx, hud, onClap, onFx, onSave
       refreshBoards()
     }
   }
-  // The server's top lists (backend leaderboard.ts): board id -> its stat. `spent` has none (no purchases yet).
-  const BOARD_STAT = { level: 'level', time: 'playTime', wins: 'wins' }
+  // The server's top lists (backend leaderboard.ts): board id -> its stat. Top Skills is the saved SKILL.
+  const BOARD_STAT = { level: 'level', time: 'playTime', skill: 'skill', wins: 'wins' }
   let serverBoards = null
   function setBoards(msg) {
     serverBoards = msg?.boards ?? null
     refreshBoards()
   }
   function refreshBoards() {
-    const mine = { level: S.level, time: S.playTime, spent: 0, wins: S.wins }
+    const mine = { level: S.level, time: S.playTime, skill: S.skill, wins: S.wins }
     const me = displayName()
     for (const id of Object.keys(mine)) {
       const rows =

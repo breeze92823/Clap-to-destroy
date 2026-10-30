@@ -457,11 +457,11 @@ export function buildPlaza(root) {
   const { eggRow, boards, logoSign, portal } = LOBBY
   const screens = {}
   for (const b of boards) {
-    const titles = b.id === 'double' ? ['Top Time Played', 'Top Robux Spent'] : [b.id === 'level' ? 'Top Level' : 'Top Wins']
+    const titles = b.id === 'double' ? ['Top Time Played', 'Top Skills'] : [b.id === 'level' ? 'Top Level' : 'Top Wins']
     const made = buildBoard(root, b, titles)
     if (b.id === 'double') {
       screens.time = made[0]
-      screens.spent = made[1]
+      screens.skill = made[1]
     } else screens[b.id] = made[0]
   }
   const eggs = EGGS.map((def) => buildEgg(root, def, eggRow[def.key], eggRow.z))
